@@ -113,7 +113,9 @@ from letta.server.global_exception_handler import setup_global_exception_handler
 from letta.server.rest_api.auth.index import setup_auth_router  # TODO: probably remove right?
 from letta.server.rest_api.interface import StreamingServerInterface
 from letta.server.rest_api.middleware import CheckPasswordMiddleware, LoggingMiddleware, RequestIdMiddleware
+from letta.server.rest_api.middleware.cognis_auth import cognis_auth_dependency  # Cognis fork
 from letta.server.rest_api.routers.v1 import ROUTERS as v1_routes
+from letta.server.rest_api.routers.v1.health import router as health_router  # Cognis fork: exempt from auth
 from letta.server.rest_api.routers.v1.organizations import router as organizations_router
 from letta.server.rest_api.routers.v1.users import router as users_router  # TODO: decide on admin
 from letta.server.rest_api.static_files import mount_static_files
@@ -849,12 +851,18 @@ def create_application() -> "FastAPI":
         # Ensure our validation handler overrides tracing's handler when tracing is enabled
         app.add_exception_handler(RequestValidationError, custom_request_validation_handler)
 
+    # Cognis fork: gate v1 routes behind Clerk JWT verification (no-op when
+    # JWT_PUBLIC_KEY_URL is unset — preserves upstream-parity for local dev).
+    # /health and /ready stay public so k8s liveness/readiness probes work.
+    from fastapi import Depends as _Depends
+
     for route in v1_routes:
-        app.include_router(route, prefix=API_PREFIX)
+        cognis_deps = [] if route is health_router else [_Depends(cognis_auth_dependency)]
+        app.include_router(route, prefix=API_PREFIX, dependencies=cognis_deps)
         # this gives undocumented routes for "latest" and bare api calls.
         # we should always tie this to the newest version of the api.
         # app.include_router(route, prefix="", include_in_schema=False)
-        app.include_router(route, prefix="/latest", include_in_schema=False)
+        app.include_router(route, prefix="/latest", include_in_schema=False, dependencies=cognis_deps)
 
     # admin/users
     app.include_router(users_router, prefix=ADMIN_PREFIX)

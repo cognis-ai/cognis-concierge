@@ -34,22 +34,38 @@ See upstream README + CONTRIBUTING.md for details. Do NOT add a separate package
 
 ## What lives here
 
-Currently (post-bootstrap):
+Currently (post-bootstrap + Phase 3 wire):
 - `FORK.md`, `CLAUDE.md`, `CODEOWNERS` — fork meta
 - `.github/workflows/license-gate.yml` — ScanCode + trap-dir gate
 - `.github/workflows/upstream-rebase.yml` — nightly rebase bot (schedule kept; flip after first manual rebase)
+- `letta/server/rest_api/middleware/cognis_auth.py` — **Cognis-side auth entrypoint.** FastAPI dependency that verifies a Clerk JWT (RS256 + JWKS), maps the `org_id` claim to a Letta `organization_id` via `organizations.cognis_org_id`, and sets `request.state.{actor_id,organization_id,cognis_org_id}` for downstream routes. Mounted on all `/v1/*` routers except `/v1/health` in `app.py`. No-op if `JWT_PUBLIC_KEY_URL` is unset (local dev preserves upstream parity).
+- `letta/branding/cognis_brand.py` — env-driven Cognis brand constants (name / tagline / logo / support email). Importable as `letta.branding.cognis_brand`. Consumed by future UI / template wiring.
+- `alembic/versions/c0951a13aa55_add_cognis_org_id_to_organization.py` — additive nullable `cognis_org_id` column on `organizations` + partial unique index.
 
-Planned (Phase 3):
-- `letta/server/rest_api/middleware/cognis_auth.py` — Clerk JWT validator, calls Bridge for `org_id` → Letta `organization_id` resolution
-- `letta/llm_api/cognis_provider.py` — OpenAI-compatible provider pinned at `llm.cognisai.com` (the LiteLLM proxy)
-- `letta/branding/` — Cognis system-prompt overlay, default persona, logos
+Planned (Phase 3 follow-up):
+- `letta/llm_api/cognis_provider.py` — OpenAI-compatible provider pinned at `llm.cognisai.com` (the LiteLLM proxy) — only if needed; current direction is env-only override (see deployment env below).
+- Cognis system-prompt overlay + default persona under `letta/branding/`
 - `tools/check_no_proprietary.py` (copied from `cognis-platform/infra/fork-templates/`)
 
 ## Auth pattern with Bridge
 
 Default = Pattern A (Bridge proxy). Cognis portal calls Bridge, Bridge holds Letta admin credentials, Bridge proxies API calls to Concierge with `Authorization: Bearer <letta-admin-key>`. Token never reaches the browser.
 
-Pattern B (FastAPI dependency in this repo) only if direct Concierge UI access is required for "memory inspection" / debug surface. One file: `letta/server/rest_api/middleware/cognis_auth.py`.
+Pattern B (FastAPI dependency in this repo) — `letta/server/rest_api/middleware/cognis_auth.py`. Active when direct Concierge UI access is required for "memory inspection" / debug surface. Enable by setting `JWT_PUBLIC_KEY_URL` (Clerk JWKS) and optionally `JWT_ISSUER` / `JWT_AUDIENCE`.
+
+## Deployment env (production rules)
+
+LLM provider base URLs MUST be set via env at deployment time — never hard-coded in source — per `cognis-platform/docs/specs/cost-policy.md`. Concrete envs Letta already honors via `letta/settings.py`:
+
+- `OPENAI_API_BASE` — point at `https://llm.cognisai.com/openai/v1` (LiteLLM proxy)
+- `ANTHROPIC_BASE_URL` — point at the LiteLLM Anthropic-shape endpoint
+- `GEMINI_BASE_URL`, `AZURE_BASE_URL`, `VLLM_API_BASE`, `SGLANG_API_BASE`, `LMSTUDIO_BASE_URL` — set as appropriate
+
+Cognis production deploys MUST:
+
+- Use **Postgres** (NOT SQLite) — APScheduler leader election relies on Postgres advisory locks.
+- **NOT** set `SENTRY_DSN`, `DD_API_KEY`, `LANGSMITH_API_KEY` — gated out per `cost-policy.md`. The Sentry / Datadog / Langsmith dependencies ship in `pyproject.toml` because Letta packages them, but they stay inert without env vars.
+- Set `JWT_PUBLIC_KEY_URL` (Clerk JWKS) to activate `cognis_auth.py`.
 
 ## What NOT to do
 

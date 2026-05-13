@@ -1,5 +1,6 @@
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
+from sqlalchemy import Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from letta.orm.sqlalchemy_base import SqlalchemyBase
@@ -36,6 +37,13 @@ class Organization(SqlalchemyBase):
 
     name: Mapped[str] = mapped_column(doc="The display name of the organization.")
     privileged_tools: Mapped[bool] = mapped_column(doc="Whether the organization has access to privileged tools.")
+    # Cognis fork: Clerk-issued org id, populated by `cognis_auth.py` middleware.
+    # Nullable so upstream / non-Cognis deployments are unaffected.
+    cognis_org_id: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Cognis (Clerk) organization id. Cognis fork only; null on upstream rows.",
+    )
 
     # relationships
     users: Mapped[List["User"]] = relationship("User", back_populates="organization", cascade="all, delete-orphan")
