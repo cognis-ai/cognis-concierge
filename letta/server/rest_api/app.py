@@ -113,6 +113,7 @@ from letta.server.global_exception_handler import setup_global_exception_handler
 from letta.server.rest_api.auth.index import setup_auth_router  # TODO: probably remove right?
 from letta.server.rest_api.interface import StreamingServerInterface
 from letta.server.rest_api.middleware import CheckPasswordMiddleware, LoggingMiddleware, RequestIdMiddleware
+from letta.branding.cognis_brand import COGNIS_BRAND, COGNIS_DASHBOARD_URL  # Cognis fork
 from letta.server.rest_api.middleware.cognis_auth import cognis_auth_dependency  # Cognis fork
 from letta.server.rest_api.routers.v1 import ROUTERS as v1_routes
 from letta.server.rest_api.routers.v1.health import router as health_router  # Cognis fork: exempt from auth
@@ -142,7 +143,9 @@ def generate_openapi_schema(app: FastAPI):
 
     letta_docs = app.openapi_schema.copy()
     letta_docs["paths"] = {k: v for k, v in letta_docs["paths"].items() if not k.startswith("/openai")}
-    letta_docs["info"]["title"] = "Letta API"
+    # Cognis fork: OpenAPI surface is customer-visible at /docs.
+    letta_docs["info"]["title"] = COGNIS_BRAND["api_title"]
+    letta_docs["info"]["description"] = COGNIS_BRAND["description"]
     letta_docs["components"]["schemas"]["LettaMessageUnion"] = create_letta_message_union_schema()
     letta_docs["components"]["schemas"]["LettaMessageContentUnion"] = create_letta_message_content_union_schema()
     letta_docs["components"]["schemas"]["LettaAssistantMessageContentUnion"] = create_letta_assistant_message_content_union_schema()
@@ -297,7 +300,10 @@ def create_application() -> "FastAPI":
     """the application start routine"""
     # global server
     # server = SyncServer(default_interface_factory=lambda: interface())
-    print(f"\n[[ Letta server // v{letta_version} ]]")
+    # Cognis fork: startup banner is the first customer-visible string an
+    # operator sees. Show the Cognis brand name; the upstream letta_version
+    # is preserved because it's a real pip-installed package identifier.
+    print(f"\n[[ {COGNIS_BRAND['name']} // letta v{letta_version} ]]")
 
     if SENTRY_ENABLED:
         sentry_sdk.init(
@@ -413,8 +419,12 @@ def create_application() -> "FastAPI":
     app = FastAPI(
         swagger_ui_parameters={"docExpansion": "none"},
         # openapi_tags=TAGS_METADATA,
-        title="Letta",
-        summary="Create LLM agents with long-term memory and custom tools 📚🦙",
+        # Cognis fork: title + summary surface at /docs (Swagger UI). The
+        # API title is rewritten in generate_openapi_schema() too — both
+        # paths must agree because the constructor values seed the
+        # initial schema and the rewrite pass mutates info.{title,description}.
+        title=COGNIS_BRAND["api_title"],
+        summary=COGNIS_BRAND["tagline"],
         version=letta_version,
         debug=debug_mode,  # if True, the stack trace will be printed in the response
         lifespan=lifespan,
@@ -918,9 +928,20 @@ def start_server(
     except Exception:
         pass
 
+    # Cognis fork: the upstream banner steered users at app.letta.com,
+    # which is a competing hosted product. We instead point at the Cognis
+    # portal if one is configured (Bridge dashboard URL), and otherwise
+    # stay silent rather than advertise an upstream URL.
+    def _dashboard_line(prefix: str) -> str:
+        if COGNIS_DASHBOARD_URL:
+            return f"{prefix}{COGNIS_BRAND['name']} dashboard: {COGNIS_DASHBOARD_URL}\n"
+        return ""
+
     if (os.getenv("LOCAL_HTTPS") == "true") or "--localhttps" in sys.argv:
         print(f"▶ Server running at: https://{host or 'localhost'}:{port or REST_DEFAULT_PORT}")
-        print("▶ View using ADE at: https://app.letta.com/development-servers/local/dashboard\n")
+        dashboard = _dashboard_line("▶ ")
+        if dashboard:
+            print(dashboard, end="")
         if importlib.util.find_spec("granian") is not None and settings.use_granian:
             from granian import Granian
 
@@ -959,10 +980,14 @@ def start_server(
         if IS_WINDOWS:
             # Windows doesn't those the fancy unicode characters
             print(f"Server running at: http://{host or 'localhost'}:{port or REST_DEFAULT_PORT}")
-            print("View using ADE at: https://app.letta.com/development-servers/local/dashboard\n")
+            dashboard = _dashboard_line("")
+            if dashboard:
+                print(dashboard, end="")
         else:
             print(f"▶ Server running at: http://{host or 'localhost'}:{port or REST_DEFAULT_PORT}")
-            print("▶ View using ADE at: https://app.letta.com/development-servers/local/dashboard\n")
+            dashboard = _dashboard_line("▶ ")
+            if dashboard:
+                print(dashboard, end="")
 
         if importlib.util.find_spec("granian") is not None and settings.use_granian:
             # Experimental Granian engine
