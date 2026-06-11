@@ -1,0 +1,141 @@
+# =============================================================================
+# Dockerfile.cognis — Cognis-managed image for Cognis Concierge (Letta fork)
+# =============================================================================
+#
+# Closes Gate 1 SEC-4 / concierge AR-1: dev/prod compose currently runs the
+# UPSTREAM `letta/letta:latest` image, so none of the fork code on cognis/main
+# (brand module, app.py brand metadata, Clerk auth gate, cognis_org_id
+# migration) has ever executed in a container. This image is the same build as
+# upstream's Dockerfile but from the fork tree, so it bakes:
+#
+#   - letta/branding/cognis_brand.py + letta/branding/assets/  (brand layer;
+#     served at /brand-assets, surfaced at /docs + the startup banner)
+#   - letta/server/rest_api/middleware/cognis_auth.py          (Clerk JWT gate;
+#     no-op until JWT_PUBLIC_KEY_URL is set — see .env.cognis.example)
+#   - alembic/versions/c0951a13aa55_*                          (additive
+#     cognis_org_id column; applied by the upstream entrypoint's migration run)
+#
+# Relationship to upstream `Dockerfile`: stages, base images, and the
+# entrypoint mirror it 1:1 (the whole fork tree is COPY'd either way).
+# Deliberate differences ONLY:
+#   1. Bases digest-pinned (deployment-map §4.2 digest-pinning policy;
+#      upstream's `ghcr.io/astral-sh/uv:latest` is a flagged moving tag).
+#   2. LETTA_ENVIRONMENT defaults to PRODUCTION, not DEV.
+#   3. Telemetry-inert by construction (cost-policy.md + repo CLAUDE.md
+#      "Deployment env"): no SENTRY_DSN, DD_API_KEY, LANGSMITH_API_KEY, or
+#      LETTA_TELEMETRY_* is baked here, and deploys must not set them. The
+#      Sentry/Datadog SDKs ship in upstream's pyproject but stay inert
+#      without those envs. The bundled otel-collector also stays unused
+#      unless explicitly configured at deploy time.
+#
+# Build (context = fork root):
+#   docker build -f Dockerfile.cognis -t cognis/concierge:dev .
+# Published by .github/workflows/publish-ghcr.yml as ghcr.io/cognis-ai/concierge.
+# =============================================================================
+
+# Start with pgvector base for builder (same base as upstream; digest-pinned)
+FROM pgvector/pgvector:0.8.1-pg15@sha256:94aee7e88f98125114657cab98e28c5dfa8dd517a6bf83fd98b503439f1e3de6 AS builder
+
+# Install Python and required packages
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-venv \
+    python3-full \
+    build-essential \
+    libpq-dev \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG LETTA_ENVIRONMENT=PRODUCTION
+ENV LETTA_ENVIRONMENT=${LETTA_ENVIRONMENT} \
+    UV_NO_PROGRESS=1 \
+    UV_PYTHON_PREFERENCE=system \
+    UV_CACHE_DIR=/tmp/uv_cache
+
+# Set for other builds
+ARG LETTA_VERSION
+ENV LETTA_VERSION=${LETTA_VERSION}
+
+WORKDIR /app
+
+# Create and activate virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Now install uv and uvx in the virtual environment
+# (upstream uses :latest — digest-pinned per deployment-map §4.2)
+COPY --from=ghcr.io/astral-sh/uv:0.9.18@sha256:5713fa8217f92b80223bc83aac7db36ec80a84437dbc0d04bbc659cae030d8c9 /uv /uvx /usr/local/bin/
+
+# Copy dependency files first
+COPY pyproject.toml uv.lock ./
+# Then copy the rest of the application code (includes the Cognis fork layer:
+# letta/branding/, cognis_auth middleware, alembic cognis migration)
+COPY . .
+
+RUN uv sync --frozen --no-dev --all-extras --python 3.11
+
+# Runtime stage (same digest-pinned base as builder)
+FROM pgvector/pgvector:0.8.1-pg15@sha256:94aee7e88f98125114657cab98e28c5dfa8dd517a6bf83fd98b503439f1e3de6 AS runtime
+
+# Overridable Node.js version with --build-arg NODE_VERSION
+ARG NODE_VERSION=22
+
+# Allow overriding the OpenTelemetry Collector version and let Docker inject TARGETARCH during build
+ARG OTEL_VERSION=0.96.0
+ARG TARGETARCH
+
+RUN set -eux; \
+    # Map TARGETARCH to the naming used by otel release assets
+    case "${TARGETARCH:-amd64}" in \
+      arm64|aarch64) OTEL_ARCH=arm64 ;; \
+      amd64|x86_64|x64) OTEL_ARCH=amd64 ;; \
+      *) OTEL_ARCH=amd64 ;; \
+    esac; \
+    apt-get update && \
+    # Install curl, Python, and PostgreSQL client libraries
+    apt-get install -y curl python3 python3-venv libpq-dev redis-server && \
+    # Install Node.js
+    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
+    apt-get install -y nodejs && \
+    # Download and install OpenTelemetry Collector for the target architecture
+    OTEL_FILENAME="otelcol-contrib_${OTEL_VERSION}_linux_${OTEL_ARCH}.tar.gz"; \
+    echo "Downloading https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTEL_VERSION}/${OTEL_FILENAME}"; \
+    curl -L "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTEL_VERSION}/${OTEL_FILENAME}" -o /tmp/otel-collector.tar.gz && \
+    tar xzf /tmp/otel-collector.tar.gz -C /usr/local/bin && \
+    rm /tmp/otel-collector.tar.gz && \
+    mkdir -p /etc/otel && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Add OpenTelemetry Collector configs (inert unless configured at deploy time)
+COPY otel/otel-collector-config-file.yaml /etc/otel/config-file.yaml
+COPY otel/otel-collector-config-clickhouse.yaml /etc/otel/config-clickhouse.yaml
+COPY otel/otel-collector-config-signoz.yaml /etc/otel/config-signoz.yaml
+
+ARG LETTA_ENVIRONMENT=PRODUCTION
+ENV LETTA_ENVIRONMENT=${LETTA_ENVIRONMENT} \
+    VIRTUAL_ENV="/app/.venv" \
+    PATH="/app/.venv/bin:$PATH" \
+    POSTGRES_USER=letta \
+    POSTGRES_PASSWORD=letta \
+    POSTGRES_DB=letta
+
+# Cognis cost-policy guard (cost-policy.md): no telemetry env is baked into
+# this image. Do NOT add SENTRY_DSN / DD_API_KEY / LANGSMITH_API_KEY /
+# LETTA_TELEMETRY_* here or in compose — the SDKs must stay inert.
+
+ARG LETTA_VERSION
+ENV LETTA_VERSION=${LETTA_VERSION}
+
+WORKDIR /app
+
+# Copy virtual environment and app from builder
+COPY --from=builder /app .
+
+# Copy initialization SQL if it exists
+COPY init.sql /docker-entrypoint-initdb.d/
+
+EXPOSE 8283 5432 6379 4317 4318
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["./letta/server/startup.sh"]

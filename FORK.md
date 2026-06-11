@@ -48,11 +48,23 @@ What lives on `cognis/main` (and ONLY here):
 - `FORK.md`, `CLAUDE.md`, `CODEOWNERS` — fork meta
 - `.github/workflows/license-gate.yml` — ScanCode allowlist enforcement
 - `.github/workflows/upstream-rebase.yml` — nightly rebase bot
-- (future) `letta/server/rest_api/middleware/cognis_auth.py` — Clerk JWT → org_id resolver, calling Bridge for tenant lookup
+- `.github/workflows/publish-ghcr.yml` — builds `Dockerfile.cognis` → `ghcr.io/cognis-ai/concierge` on tag push / dispatch (deployment-map §4.1)
+- `letta/server/rest_api/middleware/cognis_auth.py` — Clerk JWT → org_id resolver (no-op until `JWT_PUBLIC_KEY_URL` is set)
+- `letta/branding/cognis_brand.py` — env-driven brand constants (`COGNIS_BRAND_*`)
+- `letta/branding/assets/` — brand assets served at `/brand-assets` (logo/wordmark SVGs derived from the platform brand manual + design tokens; favicons rastered from the same mark — interim until the design-team master mark lands, theming spec §5)
+- `.env.cognis.example` — fork-layer env reference (`COGNIS_BRAND_*`, `JWT_PUBLIC_KEY_URL`); upstream's `.env.example` intentionally untouched
+- `Dockerfile.cognis` — Cognis image (SEC-4 closure); mirrors upstream `Dockerfile` with digest-pinned bases, `LETTA_ENVIRONMENT=PRODUCTION`, telemetry-inert
 - (future) `letta/llm_api/cognis_provider.py` — thin wrapper pinning the OpenAI-compatible client at `llm.cognisai.com`
-- (future) `letta/branding/` — Cognis logos + default system-prompt overlay
 
 All product-level multi-tenant logic lives in `cognis-platform/apps/bridge`, NOT here.
+
+## Upstream-file edit log (minimal, fenced, `brand:`/`wire:` greppable)
+
+| File | Edit | Why |
+|---|---|---|
+| `letta/server/rest_api/app.py` | brand metadata: OpenAPI title/description/summary, startup banner, optional `COGNIS_BRAND_DASHBOARD_URL` pointer (commit `196d5a499`, `brand:`) | FastAPI offers no env-level hook for OpenAPI info / banner |
+| `letta/server/rest_api/app.py` | guarded 3-line `/brand-assets` StaticFiles mount in `create_application()` (theming spec c-1, gate2-approved reduced scope; the optional custom `/docs` favicon route is DEFERRED) | `COGNIS_BRAND["logo_url"]` default 404s without a mount; `static_files.py` deliberately untouched |
+| `letta/server/rest_api/app.py` + `letta/orm/organization.py` | Clerk auth gate on `/v1/*` + additive `cognis_org_id` column (`wire:`) | auth/tenancy plumbing, out of theming scope |
 
 ## Upstream-PR policy
 

@@ -884,6 +884,14 @@ def create_application() -> "FastAPI":
     # / static files
     mount_static_files(app)
 
+    # Cognis fork: serve letta/branding/assets at /brand-assets so the
+    # COGNIS_BRAND["logo_url"] default (/brand-assets/cognis-logo.svg) resolves.
+    # Guarded: no-op when the assets dir is absent (upstream parity preserved).
+    if (_cognis_brand_assets := Path(__file__).parents[2] / "branding" / "assets").is_dir():
+        from starlette.staticfiles import StaticFiles
+
+        app.mount("/brand-assets", StaticFiles(directory=str(_cognis_brand_assets)), name="brand-assets")
+
     no_generation = "--no-generation" in sys.argv
 
     # Generate OpenAPI schema after all routes are mounted

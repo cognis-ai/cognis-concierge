@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cognis Concierge square mark (COGNIS_BRAND_LOGO_URL default target).
+
+  Derived, not invented: the Cognis brand is a TYPOGRAPHIC wordmark, no symbol
+  (cognis-platform/apps/landing/brand-manual.html §1 — "A typographic wordmark,
+  no symbol... The trailing period is part of the mark"). This square lockup is
+  the wordmark's "C." monogram on a brand-primary tile, for contexts that need
+  a square asset (logo_url contract, favicon source).
+
+  Token provenance (cognis-platform/packages/design-tokens/tokens.json):
+    tile fill        -> color.brand.primary   #0099ff (canonical primary; set as
+                        the root `color` so the tile is currentColor-friendly)
+    letterform fill  -> color.brand.on-dark   #ffffff
+    font family      -> fontFamily.product    'Inter', ui-sans-serif, system-ui, sans-serif
+    weight 600 / letter-spacing -0.03em       -> .o-wordmark, apps/marketing/app/ordina-site.css:94-97
+  Tile corner radius is proportional geometry (18.75% of edge), not a token.
+
+  Interim asset: replace with the design-team master mark when it lands
+  (theming spec §5 / open dependency 2). Do not restyle by hand.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 512 512"
+     width="512" height="512" color="#0099ff" role="img"
+     aria-label="Cognis Concierge">
+  <!-- tile: currentColor, defaults to color.brand.primary via root color attr -->
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="currentColor"/>
+  <!-- wordmark monogram "C." — trailing period is part of the mark -->
+  <text x="246" y="278" fill="#ffffff"
+        font-family="'Inter', ui-sans-serif, system-ui, sans-serif"
+        font-size="320" font-weight="600" letter-spacing="-0.03em"
+        text-anchor="middle" dominant-baseline="central">C.</text>
+</svg>
