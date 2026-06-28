@@ -1,3 +1,7 @@
+# DEPRECATED ⚰️
+
+Retired. Cognis = Voice / Chat / Brain / Security. Agent-memory absorbed by the Brain (mem0 + pgvector) + Chat.
+
 # Letta (formerly MemGPT)
 
 Build AI with advanced memory that can learn and self-improve over time.
